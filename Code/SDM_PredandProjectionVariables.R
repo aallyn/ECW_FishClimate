@@ -1,3 +1,84 @@
+# Getting the raster stacks together...
+library(raster)
+library(tidyverse)
+library(future.apply)
+clim.proj<- readRDS("~/Box/RES Data/CMIP5_SST/ProcessedSSTProjectionsWithRasters_ECW.rds")
+clim.proj$Scenario<- ifelse(grepl("RCP85", clim.proj$Path), "RCP85", "RCP45")
+
+# A very big dataset, try to reduce it
+dates.keep<- seq(as.Date("1980-01-16"), as.Date("2060-01-15"), by = "day")
+dates.keep2<- paste("X", gsub("-", ".", as.character(dates.keep)), sep = "")
+
+raster_to_df<- function(raster.stack){
+  df.out<- raster::as.data.frame(raster.stack, xy = TRUE)
+  return(df.out)
+}
+
+clim.data<- clim.proj %>%
+  dplyr::select(., Scenario, Proj.SST) %>%
+  mutate(., "Proj.SST.DataFrame" = map(Proj.SST, raster_to_df)) %>%
+  dplyr::select(., Scenario, Proj.SST.DataFrame) %>%
+  unnest(cols = "Proj.SST.DataFrame") %>%
+  gather(., Year, SST, -Scenario, -x, -y) %>%
+  dplyr::filter(., Year %in% dates.keep2)
+clim.data$Year<- gsub("X", "", clim.data$Year)
+
+rm(clim.proj)
+
+# Mean, rcp45 and rcp85
+clim.summs<- clim.data %>%
+  separate("Year", into = c("Year", "Month", "Day")) %>%
+  group_by(Scenario, Year, Month, x, y) %>%
+  summarize("Mean" = mean(SST, na.rm = TRUE),
+            "Pct5th" = quantile(SST, probs = c(0.05), na.rm = TRUE, names = FALSE),
+            "Pct95th" = quantile(SST, probs = c(0.95), na.rm = TRUE, names = FALSE))
+
+clim.summs<- clim.summs %>%
+  group_by(Scenario, Year, Month) %>%
+  nest()
+
+df_to_rast<- function(df, stat) {
+  if(FALSE){
+    df<- clim.summs$data[[1]]
+  }
+  
+  df.temp<- df %>%
+    dplyr::select(x, y, stat)
+  
+  rast.temp<- rasterFromXYZ(df.temp)
+  return(rast.temp)
+}
+
+clim.summs<- clim.summs %>%
+  mutate(., "RasterStack.Mean" = map2(data, "Mean", df_to_rast),
+         "RasterStack.Pct05" = map2(data, "Pct5th", df_to_rast),
+         "RasterStack.Pct95" = map2(data, "Pct95th", df_to_rast))
+
+# Okay, now save them....
+scenarios<- c("RCP45", "RCP85")
+
+for(i in seq_along(scenarios)){
+  scenario.use<- scenarios[i]
+  
+  dat.use<- clim.summs %>%
+    dplyr::filter(., Scenario %in% scenario.use)
+  
+  # Mean
+  mean.stack.out<- raster::stack(dat.use$RasterStack.Mean)
+  names(mean.stack.out)<- paste(dat.use$Year, dat.use$Month)
+  writeRaster(mean.stack.out, paste(res.data.path, "CMIP5_SST/ECW_", scenario.use, "_mu.grd", sep = ""), overwrite = TRUE)
+  
+  # Pct5th
+  pct5th.stack.out<- raster::stack(dat.use$RasterStack.Pct05)
+  names(pct5th.stack.out)<- paste(dat.use$Year, dat.use$Month)
+  writeRaster(pct5th.stack.out, paste(res.data.path, "CMIP5_SST/ECW_", scenario.use, "_5th.grd", sep = ""), overwrite = TRUE)
+  
+  # Pct95th
+  pct95th.stack.out<- raster::stack(dat.use$RasterStack.Pct95)
+  names(pct95th.stack.out)<- paste(dat.use$Year, dat.use$Month)
+  writeRaster(pct95th.stack.out, paste(res.data.path, "CMIP5_SST/ECW_", scenario.use, "_95th.grd", sep = ""), overwrite = TRUE)
+}
+
 fishSDM.prediction.df<- function(rcp85.mu.dir, rcp85.pct05.dir, rcp85.pct95.dir, rcp45.mu.dir, rcp45.pct05.dir, rcp45.pct95.dir, oisst.dir, sp.in, dates.baseline, dates.future, seasonal.mu, season, model.dat) {
   
   library(tidyverse)
@@ -87,14 +168,14 @@ fishSDM.prediction.df<- function(rcp85.mu.dir, rcp85.pct05.dir, rcp85.pct95.dir,
     stack.temp<- raster::stack(rcp85.mu.dir) 
     crs(stack.temp)<- proj.wgs84
     stack0<- resample(stack.temp, oisst.monthly[[1]])
-    clim.dates<- seq.Date(from = as.Date("1980-01-16"), to = as.Date("2100-12-16"), by = "month")
+    clim.dates<- seq.Date(from = as.Date("1980-01-16"), to = as.Date("2060-02-15"), by = "month")
     clim.stack<- setZ(stack0, clim.dates)
     clim.stack.zind<- getZ(clim.stack)
     
     #Baseline stack, store seasonal means and then average them all
     rcp85.mu.stack<- stack()
     
-    years<- c("2025", "2040", "2055", "2100")
+    years<- c("2055")
     
     for(i in seq_along(years)){
 
@@ -116,14 +197,14 @@ fishSDM.prediction.df<- function(rcp85.mu.dir, rcp85.pct05.dir, rcp85.pct95.dir,
     stack.temp<- raster::stack(rcp85.pct05.dir) 
     crs(stack.temp)<- proj.wgs84
     stack0<- resample(stack.temp, oisst.monthly[[1]])
-    clim.dates<- seq.Date(from = as.Date("1980-01-16"), to = as.Date("2100-12-16"), by = "month")
+    clim.dates<- seq.Date(from = as.Date("1980-01-16"), to = as.Date("2060-02-15"), by = "month")
     clim.stack<- setZ(stack0, clim.dates)
     clim.stack.zind<- getZ(clim.stack)
     
     #Baseline stack, store seasonal means and then average them all
     rcp85.pct05.stack<- stack()
     
-    years<- c("2025", "2040", "2055", "2100")
+    years<- c("2055")
     
     for(i in seq_along(years)){
       
@@ -145,14 +226,14 @@ fishSDM.prediction.df<- function(rcp85.mu.dir, rcp85.pct05.dir, rcp85.pct95.dir,
     stack.temp<- raster::stack(rcp85.pct95.dir) 
     crs(stack.temp)<- proj.wgs84
     stack0<- resample(stack.temp, oisst.monthly[[1]])
-    clim.dates<- seq.Date(from = as.Date("1980-01-16"), to = as.Date("2100-12-16"), by = "month")
+    clim.dates<- seq.Date(from = as.Date("1980-01-16"), to = as.Date("2060-02-15"), by = "month")
     clim.stack<- setZ(stack0, clim.dates)
     clim.stack.zind<- getZ(clim.stack)
     
     #Baseline stack, store seasonal means and then average them all
     rcp85.pct95.stack<- stack()
     
-    years<- c("2025", "2040", "2055", "2100")
+    years<- c("2055")
     
     for(i in seq_along(years)){
       
@@ -175,14 +256,14 @@ fishSDM.prediction.df<- function(rcp85.mu.dir, rcp85.pct05.dir, rcp85.pct95.dir,
     stack.temp<- raster::stack(rcp45.mu.dir) 
     crs(stack.temp)<- proj.wgs84
     stack0<- resample(stack.temp, oisst.monthly[[1]])
-    clim.dates<- seq.Date(from = as.Date("1980-01-16"), to = as.Date("2100-12-16"), by = "month")
+    clim.dates<- seq.Date(from = as.Date("1980-01-16"), to = as.Date("2060-02-15"), by = "month")
     clim.stack<- setZ(stack0, clim.dates)
     clim.stack.zind<- getZ(clim.stack)
     
     #Baseline stack, store seasonal means and then average them all
     rcp45.mu.stack<- stack()
     
-    years<- c("2025", "2040", "2055", "2100")
+    years<- c("2055")
     
     for(i in seq_along(years)){
       
@@ -204,14 +285,14 @@ fishSDM.prediction.df<- function(rcp85.mu.dir, rcp85.pct05.dir, rcp85.pct95.dir,
     stack.temp<- raster::stack(rcp45.pct05.dir) 
     crs(stack.temp)<- proj.wgs84
     stack0<- resample(stack.temp, oisst.monthly[[1]])
-    clim.dates<- seq.Date(from = as.Date("1980-01-16"), to = as.Date("2100-12-16"), by = "month")
+    clim.dates<- seq.Date(from = as.Date("1980-01-16"), to = as.Date("2060-02-15"), by = "month")
     clim.stack<- setZ(stack0, clim.dates)
     clim.stack.zind<- getZ(clim.stack)
     
     #Baseline stack, store seasonal means and then average them all
     rcp45.pct05.stack<- stack()
     
-    years<- c("2025", "2040", "2055", "2100")
+    years<- c("2055")
     
     for(i in seq_along(years)){
       
@@ -233,14 +314,14 @@ fishSDM.prediction.df<- function(rcp85.mu.dir, rcp85.pct05.dir, rcp85.pct95.dir,
     stack.temp<- raster::stack(rcp45.pct95.dir) 
     crs(stack.temp)<- proj.wgs84
     stack0<- resample(stack.temp, oisst.monthly[[1]])
-    clim.dates<- seq.Date(from = as.Date("1980-01-16"), to = as.Date("2100-12-16"), by = "month")
+    clim.dates<- seq.Date(from = as.Date("1980-01-16"), to = as.Date("2060-02-15"), by = "month")
     clim.stack<- setZ(stack0, clim.dates)
     clim.stack.zind<- getZ(clim.stack)
     
     #Baseline stack, store seasonal means and then average them all
     rcp45.pct95.stack<- stack()
     
-    years<- c("2025", "2040", "2055", "2100")
+    years<- c("2055")
     
     for(i in seq_along(years)){
       
@@ -481,75 +562,11 @@ fishSDM.prediction.df<- function(rcp85.mu.dir, rcp85.pct05.dir, rcp85.pct95.dir,
 }
 
 fall.rast.pred<- fishSDM.prediction.df(rcp45.mu.dir = paste(res.data.path, "CMIP5_SST/ECW_RCP45_mu.grd", sep = ""),  rcp45.pct05.dir = paste(res.data.path, "CMIP5_SST/ECW_RCP45_5th.grd", sep = ""), rcp45.pct95.dir = paste(res.data.path, "CMIP5_SST/ECW_RCP45_95th.grd", sep = ""), rcp85.mu.dir = paste(res.data.path, "CMIP5_SST/ECW_RCP85_mu.grd", sep = ""),  rcp85.pct05.dir = paste(res.data.path, "CMIP5_SST/ECW_RCP85_5th.grd", sep = ""), rcp85.pct95.dir = paste(res.data.path, "CMIP5_SST/ECW_RCP85_95th.grd", sep = ""), oisst.dir = paste(proj.path, "Data/OISSTThroughFeb2020.grd", sep = ""), sp.in = "~/Box/RES Data/Shapefiles/", dates.baseline = c("2014-10-16", "2015-10-16", "2016-10-16", "2017-10-16", "2018-10-16"), dates.future =  c("2025-10-16", "2040-10-16", "2055-10-16", "2100-10-16"), seasonal.mu = TRUE, season = "Fall", model.dat = paste(proj.path, "Data/ECWmodel.dat.rds", sep = ""))
+fall.rast.pred<- pred.df
 fall.rast.pred$SEASON<- "FALL"
 saveRDS(fall.rast.pred, file = paste(proj.path, "Data/fall.rast.preds.rds", sep = ""))
 
 spring.rast.pred<- fishSDM.prediction.df(rcp45.mu.dir = paste(res.data.path, "CMIP5_SST/ECW_RCP45_mu.grd", sep = ""),  rcp45.pct05.dir = paste(res.data.path, "CMIP5_SST/ECW_RCP45_5th.grd", sep = ""), rcp45.pct95.dir = paste(res.data.path, "CMIP5_SST/ECW_RCP45_95th.grd", sep = ""), rcp85.mu.dir = paste(res.data.path, "CMIP5_SST/ECW_RCP85_mu.grd", sep = ""),  rcp85.pct05.dir = paste(res.data.path, "CMIP5_SST/ECW_RCP85_5th.grd", sep = ""), rcp85.pct95.dir = paste(res.data.path, "CMIP5_SST/ECW_RCP85_95th.grd", sep = ""), oisst.dir = paste(proj.path, "Data/OISSTThroughFeb2020.grd", sep = ""), sp.in = "~/Box/RES Data/Shapefiles/", dates.baseline = c("2014-04-16", "2015-04-16", "2016-04-16", "2017-04-16", "2018-04-16"), dates.future =  c("2025-04-16", "2040-04-16", "2055-04-16", "2100-04-16"), seasonal.mu = TRUE, season = "Spring", model.dat = paste(proj.path, "Data/ECWmodel.dat.rds", sep = ""))
 spring.rast.pred$SEASON<- "SPRING"
 saveRDS(spring.rast.pred, file = paste(proj.path, "Data/spring.rast.preds.rds", sep = ""))
-
-# Getting the raster stacks together...
-clim.proj<- readRDS("~/Box/RES Data/CMIP5_SST/ProcessedSSTProjectionsWithRasters_ECW.rds")
-clim.proj$Scenario<- ifelse(grepl("RCP85", clim.proj$Path), "RCP85", "RCP45")
-clim.data<- clim.proj %>%
-  dplyr::select(., Scenario, Proj.SST) %>%
-  mutate(., "Proj.SST.DataFrame" = map(Proj.SST, as.data.frame())) %>%
-  unnest()
-clim.data$Year<- gsub("X", "", clim.data$Year)
-
-# Mean, rcp45 and rcp85
-clim.summs<- clim.data %>%
-  separate("Year", into = c("Year", "Month", "Day")) %>%
-  dplyr::filter(., Year >= 1980 & Year <= 2100) %>%
-  group_by(Scenario, Year, Month, x, y) %>%
-  summarize("Mean" = mean(SST, na.rm = TRUE),
-            "Pct5th" = quantile(SST, probs = c(0.05), na.rm = TRUE, names = FALSE),
-            "Pct95th" = quantile(SST, probs = c(0.95), na.rm = TRUE, names = FALSE))
-
-clim.summs<- clim.summs %>%
-  group_by(Scenario, Year, Month) %>%
-  nest()
-
-df_to_rast<- function(df, stat) {
-  if(FALSE){
-    df<- clim.summs$data[[1]]
-  }
-  
-  df.temp<- df %>%
-    dplyr::select(x, y, stat)
-  
-  rast.temp<- rasterFromXYZ(df.temp)
-  return(rast.temp)
-}
-
-clim.summs<- clim.summs %>%
-  mutate(., "RasterStack.Mean" = map2(data, "Mean", df_to_rast),
-         "RasterStack.Pct05" = map2(data, "Pct5th", df_to_rast),
-         "RasterStack.Pct95" = map2(data, "Pct95th", df_to_rast))
-
-# Okay, now save them....
-scenarios<- c("RCP45", "RCP85")
-
-for(i in seq_along(scenarios)){
-  scenario.use<- scenarios[i]
-  
-  dat.use<- clim.summs %>%
-    dplyr::filter(., Scenario %in% scenario.use)
-  
-  # Mean
-  mean.stack.out<- raster::stack(dat.use$RasterStack.Mean)
-  names(mean.stack.out)<- paste(dat.use$Year, dat.use$Month)
-  writeRaster(mean.stack.out, paste(res.data.path, "CMIP5_SST/ECW_", scenario.use, "_mu.grd", sep = ""), overwrite = TRUE)
-  
-  # Pct5th
-  pct5th.stack.out<- raster::stack(dat.use$RasterStack.Mean)
-  names(pct5th.stack.out)<- paste(dat.use$Year, dat.use$Month)
-  writeRaster(pct5th.stack.out, paste(res.data.path, "CMIP5_SST/ECW_", scenario.use, "_5th.grd", sep = ""), overwrite = TRUE)
-  
-  # Pct95th
-  pct95th.stack.out<- raster::stack(dat.use$RasterStack.Pct95)
-  names(pct95th.stack.out)<- paste(dat.use$Year, dat.use$Month)
-  writeRaster(pct95th.stack.out, paste(res.data.path, "CMIP5_SST/ECW_", scenario.use, "_95th.grd", sep = ""), overwrite = TRUE)
-}
-
 

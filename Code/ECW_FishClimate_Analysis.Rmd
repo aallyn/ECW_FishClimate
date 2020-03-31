@@ -593,9 +593,9 @@ dat.full<- dat.train %>%
 
 # Need base.preds, fut.preds
 spring.preds<- readRDS(paste(proj.path, "Data/spring.rast.preds.rds", sep = ""))
-names(spring.preds)[28]<- "DEPTH"
+names(spring.preds)[10]<- "DEPTH"
 fall.preds<- readRDS(paste(proj.path, "Data/fall.rast.preds.rds", sep = ""))
-names(fall.preds)[28]<- "DEPTH"
+names(fall.preds)[11]<- "DEPTH"
 
 base.preds.sp<- spring.preds %>%
   dplyr::select(., x, y, Baseline, DEPTH) %>%
@@ -1552,7 +1552,7 @@ preds.df.sub.perc.plot$Climate_Only<- ifelse(grepl("mu", preds.df.sub.perc.plot$
 
 ## Alright, we are now after a species - scenario - season - region - mean change dataframe...
 res<- preds.df.sub.perc.plot 
-res$Change[is.nan(res$Change)]<- NA
+res$Change[is.nan(res$Change)]<- 0
 res$Change[is.infinite(res$Change)]<- NA
 res$Change[res$Change >= 500]<- 500
 
@@ -1615,7 +1615,7 @@ for(j in seq_along(levels(df$SEASON))){
   plot.out<- ggplot(data = dat.use.df, aes(x = COMNAME.Plot, y = Change, color = Scenario)) + 
     geom_hline(yintercept = 0, color = "#bdbdbd") +
     geom_point(alpha = 0.7, size = 2.5) +
-    scale_color_manual("Climate Scenario", values = c("#3182bd", "#636363", "#de2d26")) +
+    scale_color_manual("Climate Ensemble Statistic", values = c("#3182bd", "#636363", "#de2d26")) +
     ylab("Percent change in relative biomass") + 
     xlab("Species") +
     ylim(c(-100, 500)) +
@@ -1793,7 +1793,7 @@ for(i in seq_along(spp)){
       plot.out.fall<- ggplot() +
         # Here you'd make adjustments to the point colors...
         geom_tile(data = pred.df.fall, aes(x = long, y = lat, fill = z)) +
-        scale_fill_viridis_c(name = "2011-2015\nRelative biomass", limits = c(0, max(max(pred.df.fall$z), max(pred.df.sp$z)))) +
+        scale_fill_viridis_c(name = "2015-2018\nRelative biomass", limits = c(0, max(max(pred.df.fall$z), max(pred.df.sp$z)))) +
         # scale_fill_gradient(name = "2011-2015\nRelative biomass", low = "#dde199", high = "#868d00", limits = c(0, max(max(pred.df.fall$z), max(pred.df.sp$z)))) +
         # Update "fill" and "color" to change map color
         geom_sf(data = land, fill = "#f6f6f6", color = "dark gray") +
@@ -1819,7 +1819,7 @@ for(i in seq_along(spp)){
       plot.out.sp<- ggplot() +
         # Here you'd make adjustments to the point colors...
         geom_tile(data = pred.df.sp, aes(x = long, y = lat, fill = z)) +
-        scale_fill_viridis_c(name = "2011-2015\nRelative biomass", limits = c(0, max(max(pred.df.fall$z), max(pred.df.sp$z)))) +
+        scale_fill_viridis_c(name = "2015-2018\nRelative biomass", limits = c(0, max(max(pred.df.fall$z), max(pred.df.sp$z)))) +
         # scale_fill_gradient(name = "2011-2015\nRelative biomass", low = "#dde199", high = "#868d00", limits = c(0, max(max(pred.df.fall$z), max(pred.df.sp$z)))) +
         # Update "fill" and "color" to change map color
         geom_sf(data = land, fill = "#f6f6f6", color = "dark gray") +
